@@ -38,7 +38,7 @@ def get_snowflake_config() -> SnowflakeConfig:
         "account": os.getenv("SNOWFLAKE_ACCOUNT"),
         "role": os.getenv("SNOWFLAKE_ROLE"),
         "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
-        "database": os.getenv("SNOWFLAKE_DATABASE", "DB_STREAMLIT"),
+        "database": os.getenv("SNOWFLAKE_DATABASE", "DB_STREAMLIT_APPS"),
         "schema": os.getenv("SNOWFLAKE_SCHEMA"),
     }
 
