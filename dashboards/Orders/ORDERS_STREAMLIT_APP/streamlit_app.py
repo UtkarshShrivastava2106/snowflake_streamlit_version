@@ -1,6 +1,12 @@
 import streamlit as st
 import pandas as pd
 
+from common.config import (
+    get_snowflake_config,
+    get_object_name,
+    validate_config,
+)
+
 
 # ============================================================
 # PAGE CONFIG
@@ -11,26 +17,6 @@ st.set_page_config(
     page_icon="💰",
     layout="wide",
 )
-
-
-# ============================================================
-# ENVIRONMENT CONFIGURATION
-# ============================================================
-
-# Change this value when creating the PROD Streamlit app.
-#
-# NON-PROD:
-# DB_G_GIT_UAT
-#
-# PROD:
-# DB_G_PROD
-
-DATABASE = "DB_G_GIT_UAT"
-
-SCHEMA = "FINANCE"
-TABLE = "ORDERS"
-
-FULL_TABLE_NAME = f"{DATABASE}.{SCHEMA}.{TABLE}"
 
 
 # ============================================================
@@ -46,20 +32,60 @@ session = conn.session()
 
 
 # ============================================================
+# ENVIRONMENT CONFIGURATION
+# ============================================================
+
+config = get_snowflake_config(session)
+
+validate_config(config)
+
+
+# ============================================================
+# ORDERS TABLE
+# ============================================================
+
+# Logical database:
+#     G
+#
+# Schema:
+#     FINANCE
+#
+# Table:
+#     ORDERS
+#
+# UAT resolves to:
+#     DB_G_GIT_UAT.FINANCE.ORDERS
+#
+# PROD resolves to:
+#     DB_G_PROD.FINANCE.ORDERS
+
+FULL_TABLE_NAME = get_object_name(
+    config=config,
+    database_key="G",
+    schema="FINANCE",
+    object_name="ORDERS",
+)
+
+
+# ============================================================
 # HEADER
 # ============================================================
 
 st.title("💰 Orders & Refund Dashboard")
 
 st.caption(
-    f"Environment: {'NON-PROD' if DATABASE == 'DB_G_GIT_UAT' else 'PROD'}"
-    f" | Source: {FULL_TABLE_NAME}"
+    f"Environment: {config.environment}"
+    f" | Database: {config.database}"
+    f" | Schema: {config.schema}"
+    f" | Table: ORDERS"
 )
 
 
 # ============================================================
 # DATE RANGE
 # ============================================================
+
+st.sidebar.header("🔎 Filters")
 
 date_query = f"""
 SELECT
@@ -68,13 +94,14 @@ SELECT
 FROM {FULL_TABLE_NAME}
 """
 
-date_result = session.sql(date_query).collect()[0]
+date_result = (
+    session
+    .sql(date_query)
+    .collect()[0]
+)
 
 min_date = date_result["MIN_DATE"]
 max_date = date_result["MAX_DATE"]
-
-
-st.sidebar.header("🔎 Filters")
 
 
 if min_date and max_date:
@@ -100,7 +127,24 @@ else:
 
 
 # ============================================================
-# FILTER
+# VALIDATE DATE RANGE
+# ============================================================
+
+if (
+    start_date
+    and end_date
+    and start_date > end_date
+):
+
+    st.error(
+        "Start Date cannot be after End Date."
+    )
+
+    st.stop()
+
+
+# ============================================================
+# WHERE CLAUSE
 # ============================================================
 
 if start_date and end_date:
@@ -149,13 +193,24 @@ FROM {FULL_TABLE_NAME}
 """
 
 
-kpi = session.sql(kpi_query).collect()[0]
+kpi = (
+    session
+    .sql(kpi_query)
+    .collect()[0]
+)
 
 
 total_orders = kpi["TOTAL_ORDERS"]
+
 refund_items = kpi["REFUND_ITEMS"]
-total_refund = float(kpi["TOTAL_REFUND"] or 0)
-avg_refund = float(kpi["AVG_REFUND"] or 0)
+
+total_refund = float(
+    kpi["TOTAL_REFUND"] or 0
+)
+
+avg_refund = float(
+    kpi["AVG_REFUND"] or 0
+)
 
 
 col1, col2, col3, col4 = st.columns(4)
@@ -212,7 +267,10 @@ SELECT
 
     COUNT(DISTINCT ORDER_ITEM_ID) AS REFUND_ITEMS,
 
-    SUM(REFUND_AMOUNT_USD) AS REFUND_AMOUNT
+    COALESCE(
+        SUM(REFUND_AMOUNT_USD),
+        0
+    ) AS REFUND_AMOUNT
 
 FROM {FULL_TABLE_NAME}
 
@@ -225,7 +283,8 @@ ORDER BY 1
 
 
 trend_df = (
-    session.sql(trend_query)
+    session
+    .sql(trend_query)
     .to_pandas()
 )
 
@@ -236,7 +295,9 @@ if not trend_df.empty:
         trend_df["MONTH"]
     )
 
-    trend_df = trend_df.set_index("MONTH")
+    trend_df = trend_df.set_index(
+        "MONTH"
+    )
 
     st.line_chart(
         trend_df["REFUND_AMOUNT"],
@@ -252,7 +313,7 @@ else:
 
 
 # ============================================================
-# TWO CHARTS
+# MONTHLY CHARTS
 # ============================================================
 
 col1, col2 = st.columns(2)
@@ -264,7 +325,9 @@ col1, col2 = st.columns(2)
 
 with col1:
 
-    st.subheader("📊 Refund Items by Month")
+    st.subheader(
+        "📊 Refund Items by Month"
+    )
 
     if not trend_df.empty:
 
@@ -274,6 +337,12 @@ with col1:
             y_label="Refund Items",
         )
 
+    else:
+
+        st.info(
+            "No refund item data available."
+        )
+
 
 # ------------------------------------------------------------
 # Orders
@@ -281,7 +350,9 @@ with col1:
 
 with col2:
 
-    st.subheader("📦 Orders by Month")
+    st.subheader(
+        "📦 Orders by Month"
+    )
 
     if not trend_df.empty:
 
@@ -291,80 +362,57 @@ with col2:
             y_label="Orders",
         )
 
+    else:
+
+        st.info(
+            "No order data available."
+        )
+
 
 # ============================================================
-# REFUND AMOUNT DISTRIBUTION
+# REFUND AMOUNT TREND
 # ============================================================
 
-st.subheader("💵 Refund Amount Distribution")
-
-
-distribution_query = f"""
-SELECT
-    REFUND_AMOUNT_USD
-FROM {FULL_TABLE_NAME}
-
-{where_clause}
-
-AND REFUND_AMOUNT_USD IS NOT NULL
-
-LIMIT 10000
-"""
-
-
-if where_clause:
-
-    distribution_query = f"""
-    SELECT
-        REFUND_AMOUNT_USD
-    FROM {FULL_TABLE_NAME}
-
-    {where_clause}
-
-    AND REFUND_AMOUNT_USD IS NOT NULL
-
-    LIMIT 10000
-    """
-
-else:
-
-    distribution_query = f"""
-    SELECT
-        REFUND_AMOUNT_USD
-    FROM {FULL_TABLE_NAME}
-
-    WHERE REFUND_AMOUNT_USD IS NOT NULL
-
-    LIMIT 10000
-    """
-
-
-distribution_df = (
-    session.sql(distribution_query)
-    .to_pandas()
+st.subheader(
+    "💵 Monthly Refund Amount"
 )
 
 
-if not distribution_df.empty:
+if not trend_df.empty:
 
-    distribution_df = distribution_df.rename(
-        columns={
-            "REFUND_AMOUNT_USD": "Refund Amount"
-        }
+    refund_chart_df = trend_df[
+        ["REFUND_AMOUNT"]
+    ].copy()
+
+    refund_chart_df = (
+        refund_chart_df
+        .rename(
+            columns={
+                "REFUND_AMOUNT": "Refund Amount"
+            }
+        )
     )
 
     st.area_chart(
-        distribution_df["Refund Amount"],
-        x_label="Refund",
-        y_label="Amount (USD)",
+        refund_chart_df,
+        x_label="Month",
+        y_label="Refund Amount (USD)",
+    )
+
+else:
+
+    st.info(
+        "No refund amount data available."
     )
 
 
 # ============================================================
-# TOP ORDERS
+# TOP 10 ORDERS
 # ============================================================
 
-st.subheader("🔝 Top 10 Orders by Refund")
+st.subheader(
+    "🔝 Top 10 Orders by Refund"
+)
 
 
 top_orders_query = f"""
@@ -375,8 +423,10 @@ SELECT
     COUNT(DISTINCT ORDER_ITEM_ID)
         AS REFUND_ITEMS,
 
-    SUM(REFUND_AMOUNT_USD)
-        AS TOTAL_REFUND
+    COALESCE(
+        SUM(REFUND_AMOUNT_USD),
+        0
+    ) AS TOTAL_REFUND
 
 FROM {FULL_TABLE_NAME}
 
@@ -391,7 +441,8 @@ LIMIT 10
 
 
 top_orders_df = (
-    session.sql(top_orders_query)
+    session
+    .sql(top_orders_query)
     .to_pandas()
 )
 
@@ -399,11 +450,14 @@ top_orders_df = (
 if not top_orders_df.empty:
 
     top_orders_df["ORDER_ID"] = (
-        top_orders_df["ORDER_ID"].astype(str)
+        top_orders_df[
+            "ORDER_ID"
+        ].astype(str)
     )
 
-    top_orders_df = top_orders_df.set_index(
-        "ORDER_ID"
+    top_orders_df = (
+        top_orders_df
+        .set_index("ORDER_ID")
     )
 
     st.bar_chart(
@@ -412,21 +466,33 @@ if not top_orders_df.empty:
         y_label="Refund Amount (USD)",
     )
 
+else:
+
+    st.info(
+        "No order refund data available."
+    )
+
 
 # ============================================================
-# DETAILS
+# REFUND DETAILS
 # ============================================================
 
-st.subheader("📋 Refund Details")
+st.subheader(
+    "📋 Refund Details"
+)
 
 
 details_query = f"""
 SELECT
 
     ORDER_ITEM_REFUND_ID,
+
     CREATED_AT,
+
     ORDER_ITEM_ID,
+
     ORDER_ID,
+
     REFUND_AMOUNT_USD
 
 FROM {FULL_TABLE_NAME}
@@ -440,7 +506,8 @@ LIMIT 1000
 
 
 details_df = (
-    session.sql(details_query)
+    session
+    .sql(details_query)
     .to_pandas()
 )
 
@@ -453,11 +520,30 @@ st.dataframe(
 
 
 # ============================================================
+# DOWNLOAD DATA
+# ============================================================
+
+if not details_df.empty:
+
+    csv_data = details_df.to_csv(
+        index=False
+    )
+
+    st.download_button(
+        label="⬇️ Download Refund Details",
+        data=csv_data,
+        file_name="refund_details.csv",
+        mime="text/csv",
+    )
+
+
+# ============================================================
 # FOOTER
 # ============================================================
 
 st.divider()
 
 st.caption(
-    f"Data Source: {FULL_TABLE_NAME}"
+    f"Environment: {config.environment} | "
+    f"Source: {FULL_TABLE_NAME}"
 )
