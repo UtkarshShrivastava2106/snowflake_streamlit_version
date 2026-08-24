@@ -43,7 +43,7 @@ validate_config(config)
 # ============================================================
 # ORDERS TABLE
 # ============================================================
-
+#
 # Logical database:
 #     G
 #
@@ -53,11 +53,15 @@ validate_config(config)
 # Table:
 #     ORDERS
 #
-# UAT resolves to:
+# UAT:
 #     DB_G_GIT_UAT.FINANCE.ORDERS
 #
-# PROD resolves to:
+# PROD:
 #     DB_G_PROD.FINANCE.ORDERS
+#
+# The actual database is resolved automatically by
+# common/config.py using CURRENT_ACCOUNT().
+# ============================================================
 
 FULL_TABLE_NAME = get_object_name(
     config=config,
@@ -82,10 +86,15 @@ st.caption(
 
 
 # ============================================================
-# DATE RANGE
+# SIDEBAR
 # ============================================================
 
 st.sidebar.header("🔎 Filters")
+
+
+# ============================================================
+# DATE RANGE
+# ============================================================
 
 date_query = f"""
 SELECT
@@ -124,6 +133,10 @@ else:
 
     start_date = None
     end_date = None
+
+    st.sidebar.info(
+        "No CREATED_AT data is available."
+    )
 
 
 # ============================================================
@@ -164,7 +177,7 @@ else:
 
 
 # ============================================================
-# KPI SECTION
+# KEY METRICS
 # ============================================================
 
 st.subheader("📌 Key Metrics")
@@ -319,9 +332,9 @@ else:
 col1, col2 = st.columns(2)
 
 
-# ------------------------------------------------------------
-# Refund Items
-# ------------------------------------------------------------
+# ============================================================
+# REFUND ITEMS
+# ============================================================
 
 with col1:
 
@@ -344,9 +357,9 @@ with col1:
         )
 
 
-# ------------------------------------------------------------
-# Orders
-# ------------------------------------------------------------
+# ============================================================
+# ORDERS
+# ============================================================
 
 with col2:
 
@@ -370,7 +383,7 @@ with col2:
 
 
 # ============================================================
-# REFUND AMOUNT TREND
+# MONTHLY REFUND AMOUNT
 # ============================================================
 
 st.subheader(
@@ -512,9 +525,13 @@ details_df = (
 )
 
 
+# ============================================================
+# DETAILS TABLE
+# ============================================================
+
 st.dataframe(
     details_df,
-    use_container_width=True,
+    width="stretch",
     height=450,
 )
 
@@ -534,6 +551,7 @@ if not details_df.empty:
         data=csv_data,
         file_name="refund_details.csv",
         mime="text/csv",
+        width="stretch",
     )
 
 
