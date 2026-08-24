@@ -1,0 +1,2 @@
+# snowflake_streamlit_version
+snowflake_streamlit_version
